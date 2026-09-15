@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(npm install *)",
+      "Bash(node *)",
+      "Bash(npx tsc *)",
+      "Bash(DATABASE_PATH=/tmp/arena-seed.db npm run seed)",
+      "Bash(DATABASE_PATH=/tmp/arena-seed.db npx tsx *)",
+      "Bash(npm run *)",
+      "Bash(npx vitest *)",
+      "Bash(curl -s -m 5 -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:3210/calendar)",
+      "Bash(pkill -f remix-serve)",
+      "Bash(rm -f data/arena.db*)",
+      "Bash(netstat -tln)",
+      "Bash(curl -s -m 5 \"http://172.17.0.3:3210/calendar\" -o /tmp/p.html)",
+      "Bash(curl -s -m 5 -o /dev/null -w \"%{http_code}\\\\n\" http://172.17.0.3:3210/calendar)",
+      "Bash(curl -s \"http://172.17.0.3:3210/calendar?date=2026-09-22\")",
+      "Bash(curl *)",
+      "Bash(kill 4956)"
+    ]
+  }
+}
