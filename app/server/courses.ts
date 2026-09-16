@@ -168,6 +168,26 @@ function validateTimeWindow(startTime: string, endTime: string): void {
   }
 }
 
+/**
+ * 展开结果逐节与既有占用（其他班课、散客有效单）做冲突校验，撞则抛错。
+ * 建班与重排（请假/节假日触发）共用同一口径：班课绝不压散客已订时段。
+ */
+function assertSessionsFree(db: DB, specs: SessionSpec[]): void {
+  for (const s of specs.filter((x) => x.state !== "leave")) {
+    const conflicts = findConflicts(
+      db,
+      s.courtId,
+      slotKey(s.date, s.startTime),
+      slotKey(s.date, s.endTime),
+    );
+    if (conflicts.length > 0) {
+      throw new CourseError(
+        `${s.date} ${s.startTime}-${s.endTime} 与已有占用冲突：${conflicts[0]!.label}`,
+      );
+    }
+  }
+}
+
 function insertSessions(db: DB, courseId: number, sessions: SessionSpec[]): void {
   const stmt = db.prepare(
     `INSERT INTO course_sessions (course_id, seq, court_id, date, start_time, end_time, state, orig_date, note)
@@ -196,19 +216,7 @@ export function createCourse(db: DB, input: CreateCourseInput): number {
 
   const tx = db.transaction(() => {
     // 与既有用场冲突则拒绝（教练班课之间、班课与散客单都不许撞）
-    for (const s of specs.filter((x) => x.state !== "leave")) {
-      const conflicts = findConflicts(
-        db,
-        s.courtId,
-        slotKey(s.date, s.startTime),
-        slotKey(s.date, s.endTime),
-      );
-      if (conflicts.length > 0) {
-        throw new CourseError(
-          `${s.date} ${s.startTime}-${s.endTime} 与已有占用冲突：${conflicts[0]!.label}`,
-        );
-      }
-    }
+    assertSessionsFree(db, specs);
 
     const info = db
       .prepare(
@@ -302,6 +310,9 @@ function reexpand(db: DB, c: CourseRow): void {
     loadLeaveSet(db, c.id),
   );
   db.prepare("DELETE FROM course_sessions WHERE course_id = ?").run(c.id);
+  // 先删自己的旧场次再校验：顺延/恢复出来的新日期不得压散客单或其他班课，
+  // 撞了抛错由外层事务整体回滚（请假登记/节假日变动一并撤销）
+  assertSessionsFree(db, specs);
   insertSessions(db, c.id, specs);
 }
 

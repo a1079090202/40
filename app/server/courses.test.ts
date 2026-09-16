@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addHoliday } from "~/server/catalog";
+import { createBooking, getBooking } from "~/server/bookings";
 import {
   CourseError,
   createCourse,
@@ -118,5 +119,64 @@ describe("建班批量占场与节假日重排", () => {
     const m = listCourseSessions(db, makeupId) as Array<{ seq: number; date: string; state: string }>;
     expect(m.find((s) => s.seq === 2 && s.state === "leave")!.date).toBe("2026-09-25");
     expect(m.find((s) => s.state === "makeup")!.date).toBe("2026-11-13");
+  });
+});
+
+describe("重排冲突校验：班课重排不得压散客已订时段", () => {
+  it("顺延目标日已被散客订下：登记整段请假必拦，且请假/排期/散客单全部原样", () => {
+    const { db, now, cards } = setupWorld();
+    const courseId = createCourse(db, { ...FRIDAY_COURSE, holidayPolicy: "postpone" });
+    // 散客先订下第 2 节（9/25）的顺延目标日 9/26 同时段
+    const bookingId = createBooking(db, {
+      memberId: 1, cardId: cards.badminton, courtId: 2,
+      startSlot: "2026-09-26 18:00", endSlot: "2026-09-26 19:30", now,
+    });
+
+    let err: unknown;
+    try {
+      setCourseLeave(db, courseId, "2026-09-25", true);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(CourseError);
+    expect((err as Error).message).toContain("2026-09-26");
+    expect((err as Error).message).toContain("散客");
+
+    // 事务整体回滚：请假没登记上，场次保持原排期，散客单不受影响
+    expect(
+      db.prepare("SELECT count(*) n FROM course_leaves WHERE course_id = ?").get(courseId),
+    ).toMatchObject({ n: 0 });
+    const sessions = listCourseSessions(db, courseId) as Array<{ seq: number; date: string }>;
+    expect(sessions.find((s) => s.seq === 2)!.date).toBe("2026-09-25");
+    expect(getBooking(db, bookingId)!.status).toBe("held");
+  });
+
+  it("节假日触发 reexpandAll 时撞散客单同样必拦，全班课排期不变", () => {
+    const { db, now, cards } = setupWorld();
+    const courseId = createCourse(db, { ...FRIDAY_COURSE, holidayPolicy: "postpone" });
+    createBooking(db, {
+      memberId: 1, cardId: cards.badminton, courtId: 2,
+      startSlot: "2026-09-26 18:00", endSlot: "2026-09-26 19:30", now,
+    });
+
+    addHoliday(db, "2026-09-25", "中秋节");
+    expect(() => reexpandAll(db)).toThrow(CourseError);
+    const sessions = listCourseSessions(db, courseId) as Array<{ seq: number; date: string }>;
+    expect(sessions.find((s) => s.seq === 2)!.date).toBe("2026-09-25");
+  });
+
+  it("撤销请假恢复名义日期时，撞上请假期间被散客订走的时段也必拦", () => {
+    const { db, now, cards } = setupWorld();
+    const courseId = createCourse(db, { ...FRIDAY_COURSE, holidayPolicy: "postpone" });
+    setCourseLeave(db, courseId, "2026-09-25", true); // 第 2 节顺延到 9/26，名义日 9/25 空出
+    createBooking(db, {
+      memberId: 1, cardId: cards.badminton, courtId: 2,
+      startSlot: "2026-09-25 18:00", endSlot: "2026-09-25 19:30", now,
+    });
+
+    expect(() => setCourseLeave(db, courseId, "2026-09-25", false)).toThrow(CourseError);
+    // 回滚后仍是请假顺延状态
+    const sessions = listCourseSessions(db, courseId) as Array<{ seq: number; date: string }>;
+    expect(sessions.find((s) => s.seq === 2)!.date).toBe("2026-09-26");
   });
 });

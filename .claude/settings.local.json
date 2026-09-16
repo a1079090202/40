@@ -17,7 +17,8 @@
       "Bash(curl -s -m 5 -o /dev/null -w \"%{http_code}\\\\n\" http://172.17.0.3:3210/calendar)",
       "Bash(curl -s \"http://172.17.0.3:3210/calendar?date=2026-09-22\")",
       "Bash(curl *)",
-      "Bash(kill 4956)"
+      "Bash(kill 4956)",
+      "Bash(npm test *)"
     ]
   }
 }

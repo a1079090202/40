@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { getDb } from "~/server/db";
 import { addHoliday, deleteHoliday, listHolidays } from "~/server/catalog";
 import { reexpandAll } from "~/server/courses";
@@ -22,13 +22,26 @@ export async function action({ request }: ActionFunctionArgs) {
   const form = await request.formData();
   const kind = String(form.get("kind"));
   if (kind === "add-holiday") {
-    addHoliday(db, String(form.get("date")), String(form.get("name")));
-    reexpandAll(db);
+    // 节假日落库与全班课重排同一事务：重排撞散客单/班课时整体回滚，不留半截状态
+    try {
+      db.transaction(() => {
+        addHoliday(db, String(form.get("date")), String(form.get("name")));
+        reexpandAll(db);
+      })();
+    } catch (e) {
+      return json({ error: `节假日未加入：${(e as Error).message}` });
+    }
     return redirect("/admin?msg=" + encodeURIComponent("节假日已加入，全班课已按各自配置（顺延/补课）重排"));
   }
   if (kind === "del-holiday") {
-    deleteHoliday(db, String(form.get("date")));
-    reexpandAll(db);
+    try {
+      db.transaction(() => {
+        deleteHoliday(db, String(form.get("date")));
+        reexpandAll(db);
+      })();
+    } catch (e) {
+      return json({ error: `节假日未删除：${(e as Error).message}` });
+    }
     return redirect("/admin?msg=" + encodeURIComponent("节假日已删除，班课已重排"));
   }
   if (kind === "sweep") {
@@ -47,12 +60,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function AdminPage() {
   const d = useLoaderData<typeof loader>();
+  const resp = useActionData<typeof action>();
   const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
 
   return (
     <div>
       <h1>节假日 / 爽约处理</h1>
       {params.get("msg") && <div className="flash-ok">{params.get("msg")}</div>}
+      {resp && "error" in resp && resp.error && (
+        <div className="flash-error">{resp.error}</div>
+      )}
 
       <div className="panel">
         <h2 style={{ marginTop: 0 }}>法定节假日（加入后全班课自动重排：顺延班课找最近空档，补课班课周期后补）</h2>
